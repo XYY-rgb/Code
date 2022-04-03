@@ -1,0 +1,312 @@
+# coding: utf-8
+import numpy as np
+import random
+import matplotlib.pyplot as plt
+import pandas as pd
+import math
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import train_test_split
+
+plt.rcParams['font.sans-serif'] = ['SimHei']
+plt.rcParams['font.sans-serif'] = ['Arial Unicode MS']
+plt.rcParams['axes.unicode_minus'] = False
+
+def inputnahandle(con_data):
+    m = len(con_data)
+    n = len(con_data[0])
+    for i in range(n):
+        count = 0
+        sum = 0
+        for j in range(m):
+            if(np.isnan(con_data[j,i]) != True):
+                sum+=con_data[j,i]
+                count+=1
+        mean=sum/count
+        for j in range(m):
+            if (np.isnan(con_data[j,i])):
+                con_data[j, i] = mean
+    return con_data
+
+def outputnahandle(con_data):
+    m=len(con_data)
+    n=1
+    sum=0
+    count=0
+    for j in range(m):
+        if(np.isnan(con_data[j])!=True):
+            sum+=con_data[j]
+            count+=1
+    mean=sum/count
+    for j in range(m):
+        if (np.isnan(con_data[j])):
+            con_data[j]=mean
+    return con_data
+
+def minmax(train):
+    n = len(train[0])
+    list1 = []
+    for j in range(n):
+        colmax = max(train[:, j])
+        colmin = min(train[:, j])
+        list1.append(colmin)
+        list1.append(colmax)
+    return list1
+
+def mapminmax(con_data, list1):
+    m = len(con_data)
+    n = len(con_data[0])
+    change_data = np.zeros((m, n))
+    for j in range(n):
+        for i in range(m):
+            change_data[i, j] = 2 * (con_data[i, j] - list1[2 * j]) / (list1[2 * j + 1] - list1[2 * j]) - 1
+    return change_data
+
+def outputmapminmax(con_data, list1):
+    m = len(con_data)
+    n = 1
+    change_data = np.zeros((m, n))
+    for i in range(m):
+        change_data[i] = 2 * (con_data[i] - list1[-2]) / (list1[-1] - list1[-2]) - 1
+    return change_data
+
+def distance(trainX, testX,sigmax, sigmay, sigmaz, sigma):
+    p = len(testX)
+    m = len(trainX)
+    Euclidean_DF_guass = np.zeros((p, m))
+    for i in range(p):
+        for j in range(m):
+            tempx = (testX[i, 0] - trainX[j, 0]) * (testX[i, 0] - trainX[j, 0])
+            tempy = (testX[i, 1] - trainX[j, 1]) * (testX[i, 1] - trainX[j, 1])
+            tempz = (testX[i, 2] - trainX[j, 2]) * (testX[i, 2] - trainX[j, 2])
+            tempp = np.sum((testX[i, 3:] - trainX[j, 3:]) * (testX[i, 3:] - trainX[j, 3:]))
+
+            Euclidean_DF_guass[i, j] = np.exp((-tempx / (2 * sigmax*sigmax)) + (-tempy /(2 * sigmay*sigmay)) +
+                                                  (-tempz / (2 * sigmaz*sigmaz)) + (-tempp / (2 * sigma*sigma)))
+    return Euclidean_DF_guass
+
+def sum_layer(Gauss, outputn_train1):
+    m = len(Gauss)
+    l = len(Gauss[0])
+    n = len(outputn_train1[0])
+    sum_out = np.zeros((m, n + 1))
+    for i in range(m):
+        sum_out[i, 0] = np.sum(Gauss[i, :])
+    for i in range(m):
+        total = 0.0
+        for t in range(l):
+            total += Gauss[i, t] * outputn_train1[t, 0]
+        sum_out[i, 1] = total
+    return sum_out
+
+def output_layer(sum_out):
+    m = len(sum_out)
+    n = len(sum_out[0])
+    prediction_result = np.zeros((m, n - 1))
+    for i in range(n - 1):
+        if (sum_out[i, 0] == 0):
+            prediction_result[i, 0] = 0
+        else:
+            prediction_result[i, 0] = sum_out[i, 1] / sum_out[i, 0]
+    return prediction_result
+
+def reverseminmax(predict_data1, bmin, bmax):
+    m = len(predict_data1)
+    reverse_data = np.zeros((m, 1))
+    for i in range(m):
+        reverse_data[i, 0] = (predict_data1[i, 0] + 1) * (bmax - bmin) / 2 + bmin
+    return reverse_data
+
+def get_mse(records_real, records_predict):
+    if len(records_real) == len(records_predict):
+        return sum([(x - y) ** 2 for x, y in zip(records_real, records_predict)]) / len(records_real)
+    else:
+        return None
+
+def get_rmse(records_real, records_predict):
+    mse = get_mse(records_real, records_predict)
+    if mse:
+        return math.sqrt(mse)
+    else:
+        return None
+
+def get_mae(records_real, records_predict):
+    if len(records_real) == len(records_predict):
+        return sum([abs(x - y) for x, y in zip(records_real, records_predict)]) / len(records_real)
+    else:
+        return None
+
+def R2(output_test, grnn_output):
+    SSR = np.sum((grnn_output - np.mean(output_test)) ** 2)
+    SST = np.sum((output_test - np.mean(output_test)) ** 2)
+    R2 = SSR / SST
+    return R2
+
+def mape(records_real, records_predict):
+    return np.mean(np.abs((records_predict - records_real) / records_real)) * 100
+
+# ----------------------PSO参数设置---------------------------------
+class PSO():
+    def __init__(self, pN, dim, max_iter, w):
+        self.w = w
+        self.wmax = 0.9
+        self.wmin = 0.1
+        self.r1 = 0.6
+        self.r2 = 0.3
+        self.Xmax = 1
+        self.Xmin = 0
+        self.pN = pN  # 粒子数量
+        self.dim = dim  # 搜索维度
+        self.max_iter = max_iter  # 迭代次数
+        self.X = np.zeros((self.pN, self.dim))  # 所有粒子的位置和速度
+        self.V = np.zeros((self.pN, self.dim))
+        self.pbest = np.zeros((self.pN, self.dim))  # 个体经历的最佳位置和全局最佳位置
+        self.gbest = np.zeros((1, self.dim))
+        self.p_fit = np.zeros(self.pN)  # 每个个体的历史最佳适应值
+        self.fit = 1e10  # 全局最佳适应值
+
+    def getweight(self, iter):
+        w = self.wmax - (self.wmax - self.wmin) * np.sqrt(iter / self.max_iter)
+        return w
+
+    def getc(self, iter):
+        c1 = 2 * np.sqrt(np.cos((np.pi / 2) * (iter / self.max_iter)))
+        c2 = 2 * np.sqrt(1 - (np.cos((np.pi / 2) * (iter / self.max_iter))))
+        return c1, c2
+
+    # ---------------------目标函数Sphere函数-----------------------------
+    def function(self, X):
+        Euclidean_DF = distance(inputn_train, inputn_test, X[0], X[1], X[2], X[3])
+        sum_out = sum_layer(Euclidean_DF, outputn_train)
+        prediction_result = output_layer(sum_out)
+        grnn_output = reverseminmax(prediction_result, bmin, bmax)
+        return mean_squared_error(output_test, grnn_output)
+
+    # ---------------------初始化种群----------------------------------
+    def init_Population(self):
+        for i in range(self.pN):
+            for j in range(self.dim):
+                self.X[i][j] = random.uniform(0, 1)
+                self.V[i][j] = random.uniform(0, 1)
+            self.pbest[i] = self.X[i]
+            tmp = self.function(self.X[i])
+            self.p_fit[i] = tmp
+            if tmp < self.fit:
+                self.fit = tmp
+                self.gbest = self.X[i]
+
+    # ----------------------更新粒子位置----------------------------------
+    def iterator(self):
+        fitness = []
+        for t in range(self.max_iter):
+            weight = self.getweight(t)
+            c1, c2 = self.getc(t)
+            for i in range(self.pN):  # 更新gbest\pbest
+                temp = self.function(self.X[i])
+                if temp < self.p_fit[i] and self.X[i][0] < self.Xmax and self.X[i][0] > self.Xmin \
+                        and self.X[i][1] < self.Xmax and self.X[i][1] > self.Xmin \
+                        and self.X[i][2] < self.Xmax and self.X[i][2] > self.Xmin \
+                        and self.X[i][3] < self.Xmax and self.X[i][3] > self.Xmin:  # 更新个体最优
+                    self.p_fit[i] = temp
+                    self.pbest[i] = self.X[i]
+                    if self.p_fit[i] < self.fit:  # 更新全局最优
+                        self.gbest = self.X[i]
+                        self.fit = self.p_fit[i]
+            for i in range(self.pN):
+                self.V[i] = weight * self.V[i] + c1 * self.r1 * (self.pbest[i] - self.X[i]) + \
+                            c2 * self.r2 * (self.gbest - self.X[i])
+                self.X[i] = self.X[i] + self.V[i]
+            print(weight)
+            fitness.append(self.fit)
+            print("sigma", self.X[0], end=" ")
+            sigma_list.append(self.X[0])
+            fit_list.append(self.fit)
+            print('均方', self.fit)  # 输出最优值
+        return fitness
+
+# ----------------------程序执行-----------------------
+num1 = pd.read_csv('train.csv')
+num2 = pd.read_csv('test.csv')
+
+m = num1.shape[1]
+n = num2.shape[1]
+
+input_train = num1.iloc[0:, 0:m - 1].values
+output_train = num1.iloc[0:, m - 1].values
+input_test = num2.iloc[0:, 0:n - 1].values
+output_test = num2.iloc[0:, n - 1].values
+
+input_train[np.isnan(input_train)] = 0
+output_train[np.isnan(output_train)] = 0
+input_test[np.isnan(input_test)] = 0
+output_test[np.isnan(output_test)] = 0
+
+list1 = minmax(num1.iloc[1:, ].values)
+inputn_train = mapminmax(input_train, list1)
+inputn_test = mapminmax(input_test, list1)
+outputn_train = outputmapminmax(output_train, list1)
+
+bmin = min(output_train)
+bmax = max(output_train)
+
+sigmax_list = []
+sigmay_list = []
+sigmaz_list = []
+sigma_list = []
+fit_list = []
+
+my_pso = PSO(pN=200, dim=4, max_iter=500, w=0.8)
+my_pso.init_Population()
+fitness = my_pso.iterator()
+print("最佳sigma", sigma_list[np.argmin(fit_list)])
+Euclidean_DF_guass = distance(inputn_train, inputn_test, sigma_list[np.argmin(fit_list)][0],
+                              sigma_list[np.argmin(fit_list)][1], sigma_list[np.argmin(fit_list)][2],sigma_list[np.argmin(fit_list)][3])
+sum_out = sum_layer(Euclidean_DF_guass, outputn_train)
+prediction_result = output_layer(sum_out)
+grnn_output=reverseminmax(prediction_result,bmin,bmax)
+
+print('结果',output_test,grnn_output)
+grnn_error = mean_squared_error( output_test,grnn_output)
+print('PSO-GRNN均方误差',get_mse(output_test,grnn_output))
+print('PSO-GRNN均方根误差',get_rmse(output_test,grnn_output))
+print('PSO-GRNN平均绝对百分比误差',mape(output_test,grnn_output))
+print('PSO-GRNN神经网络预测的均方误差为',grnn_error)
+print('PSO-GRNN平均绝对误差',get_mae(output_test,grnn_output))
+r=R2(output_test,grnn_output)
+print('PSO-GRNN决定系数',r)
+
+plt.figure()
+plt.title("PSO-GRNN预测结果对比", size=18)
+plt.plot(grnn_output, 'k-*', label='PSO-GRNN预测值')
+plt.plot(output_test, 'r-o', label='实际值')
+plt.xlabel('测试样本', size=18)
+plt.ylabel('矿石品位值 %', size=18)
+plt.legend()
+
+plt.figure()
+plt.plot(output_test, grnn_output, '*', label='实际值-预测值')
+plt.title("PSO-GRNN-决定系数", size=18)
+x=np.linspace(min(output_test),max(output_test),3)
+y=x
+plt.plot(x,y,color='green',label='y=x')
+r=round(r,6)
+l='R^2={}'.format(r)
+plt.text(min(output_test),38,l,fontsize=15)
+plt.legend(fontsize=15)
+plt.xlabel('实际值 %', size=18)
+plt.ylabel('预测值 %', size=18)
+
+plt.figure()
+plt.plot(grnn_error, 'k-*')
+plt.title("PSO-GRNN均方误差")
+plt.ylabel('均方误差')
+plt.show()
+
+# -------------------画图--------------------
+plt.figure(1)
+plt.title("Figure")
+plt.xlabel("iterators", size=14)
+plt.ylabel("fitness", size=14)
+t = np.array([t for t in range(0, 500)])
+fitness = np.array(fitness)
+plt.plot(t, fitness, color='b', linewidth=3)
+plt.show()
